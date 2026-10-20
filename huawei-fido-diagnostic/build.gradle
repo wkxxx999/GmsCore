@@ -1,0 +1,19 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'org.microg.fidodiagnostic'
+    compileSdkVersion androidCompileSdk
+
+    defaultConfig {
+        applicationId 'org.microg.fidodiagnostic'
+        minSdkVersion 23
+        targetSdkVersion 29
+        versionCode 1
+        versionName '0.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
