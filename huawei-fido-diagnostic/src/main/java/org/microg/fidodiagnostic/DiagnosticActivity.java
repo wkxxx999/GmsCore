@@ -13,6 +13,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -72,6 +73,22 @@ public final class DiagnosticActivity extends Activity {
         });
         layout.addView(copy);
 
+        Button play = new Button(this);
+        play.setText("打开 Google Play（查看设备认证）");
+        play.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { openPlayStore(); }
+        });
+        layout.addView(play);
+
+        Button passkeys = new Button(this);
+        passkeys.setText("打开 Google 账号通行密钥");
+        passkeys.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                openWebPage("https://myaccount.google.com/signinoptions/passkeys");
+            }
+        });
+        layout.addView(passkeys);
+
         results = new TextView(this);
         results.setTypeface(Typeface.MONOSPACE);
         results.setTextSize(13);
@@ -107,6 +124,16 @@ public final class DiagnosticActivity extends Activity {
         fidoServiceStatus(b, pm, "regular / App", "com.google.android.gms.fido.fido2.regular.START");
         line(b, "");
 
+        line(b, "=== Google Play / Play Integrity 认证 ===");
+        line(b, "Play Protect 设备认证: 无公开 API 可以可靠读取。");
+        line(b, "官方检查: Play 商店 -> 头像 -> 设置 -> 关于 -> Play 保护机制认证。");
+        line(b, "Google Play Integrity: 必须由注册的开发者应用请求并在服务端解密判定结果。");
+        line(b, "包名和版本可见、Play 商店可打开、指纹正常均不代表设备已通过认证。");
+        line(b, "此工具不伪造 Play Integrity 判定，也不绕过 Google 设备认证。");
+        line(b, "Android 安全补丁日期: " + Build.VERSION.SECURITY_PATCH);
+        line(b, "系统 Build 类型: " + Build.TYPE + " (仅供参考，不等同于认证)");
+        line(b, "");
+
         line(b, "=== Google 通行密钥兼容性 ===");
         if (Build.VERSION.SDK_INT < 34) {
             line(b, "Android 第三方凭据提供器: 无（该系统接口从 Android 14 开始）");
@@ -122,6 +149,28 @@ public final class DiagnosticActivity extends Activity {
 
         lastReport = b.toString();
         results.setText(lastReport);
+    }
+
+    private void openPlayStore() {
+        Intent launch = getPackageManager().getLaunchIntentForPackage("com.android.vending");
+        if (launch == null) {
+            android.widget.Toast.makeText(this, "Google Play 商店不可打开", android.widget.Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            startActivity(launch);
+            android.widget.Toast.makeText(this, "进入 Play 商店：头像 → 设置 → 关于 → 设备认证", android.widget.Toast.LENGTH_LONG).show();
+        } catch (RuntimeException e) {
+            android.widget.Toast.makeText(this, "无法启动 Play 商店", android.widget.Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openWebPage(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (RuntimeException e) {
+            android.widget.Toast.makeText(this, "找不到可打开网页的浏览器", android.widget.Toast.LENGTH_LONG).show();
+        }
     }
 
     private String secureLock() {
