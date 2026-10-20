@@ -1,0 +1,36 @@
+# Claude Code only runs after repository owner calls @claude on an existing PR.
+# Prerequisites (must be configured by repo owner):
+#   1. Install https://github.com/apps/claude for wkxxx999/GmsCore
+#   2. Add ANTHROPIC_API_KEY as GitHub Actions repository secret (never commit it).
+# The workflow must live on the default branch for issue_comment to trigger.
+name: Claude Code microG collaborator
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  claude:
+    if: >-
+      github.repository == 'wkxxx999/GmsCore' &&
+      github.actor == 'wkxxx999' &&
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --max-turns 15
