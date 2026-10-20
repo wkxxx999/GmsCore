@@ -20,7 +20,7 @@
     </queries>
 
     <application
-        android:label="Huawei FIDO2 诊断"
+        android:label="华为 FIDO2 诊断 V2"
         android:allowBackup="false"
         android:usesCleartextTraffic="false">
         <activity
