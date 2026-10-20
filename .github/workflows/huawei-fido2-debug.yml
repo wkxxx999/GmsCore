@@ -38,10 +38,25 @@ jobs:
       - name: Build Huawei debug variant
         run: ./gradlew :play-services-core:assembleHmsHuaweiDebug --stacktrace
 
+      - name: Locate and stage Huawei APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t apks < <(find play-services-core/build/outputs/apk -type f -name '*.apk' -print0)
+          printf 'APK files found: %s\n' "${#apks[@]}"
+          printf '%s\n' "${apks[@]}"
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one Huawei debug APK."
+            exit 1
+          fi
+          mkdir -p upload
+          cp -- "${apks[0]}" upload/
+          sha256sum upload/*.apk
+
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
           name: microg-huawei-fido2-debug-test-only
-          path: play-services-core/build/outputs/apk/hms/huawei/debug/*.apk
+          path: upload/*.apk
           if-no-files-found: error
           retention-days: 7
