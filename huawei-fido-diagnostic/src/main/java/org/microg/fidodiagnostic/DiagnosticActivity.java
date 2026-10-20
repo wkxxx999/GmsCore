@@ -17,6 +17,8 @@ import android.net.Uri;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.pm.ServiceInfo;
+import java.util.Locale;
 import android.hardware.fingerprint.FingerprintManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -119,9 +121,14 @@ public final class DiagnosticActivity extends Activity {
         packageStatus(b, pm, "Chrome", "com.android.chrome");
         line(b, "");
 
+        line(b, "");
+        line(b, "=== 系统列举的 Google / microG 相关安装包 ===");
+        listRelatedPackages(b, pm);
+        line(b, "");
         line(b, "=== FIDO2 Android Binder 服务（只检查可见性） ===");
         fidoServiceStatus(b, pm, "privileged / Chrome", "com.google.android.gms.fido.fido2.privileged.START");
         fidoServiceStatus(b, pm, "regular / App", "com.google.android.gms.fido.fido2.regular.START");
+        inspectFidoServices(b, pm);
         line(b, "");
 
         line(b, "=== Google Play / Play Integrity 认证 ===");
@@ -198,9 +205,98 @@ public final class DiagnosticActivity extends Activity {
             line(b, label + ": " + (info.versionName == null ? "版本未知" : info.versionName)
                 + (info.applicationInfo != null && info.applicationInfo.enabled ? " [启用]" : " [禁用]"));
         } catch (PackageManager.NameNotFoundException e) {
-            line(b, label + ": 未发现/不可见");
+            line(b, label + ": 此包名未找到（不能推断相关应用未安装）");
         } catch (RuntimeException e) {
             line(b, label + ": 查询失败：" + e.getClass().getSimpleName());
+        }
+    }
+
+
+    /**
+     * Enumerate relevant packages without assuming that vendor forks or
+     * compatibility layers use com.google.android.gms/com.android.vending.
+     * This app has no INTERNET permission; the list is shown only on-device.
+     */
+    @SuppressWarnings("deprecation")
+    private static void listRelatedPackages(StringBuilder b, PackageManager pm) {
+        try {
+            List<PackageInfo> installed = pm.getInstalledPackages(0);
+            int matches = 0;
+            for (PackageInfo info : installed) {
+                String id = info.packageName;
+                String name = "";
+                if (info.applicationInfo != null) {
+                    try {
+                        CharSequence label = pm.getApplicationLabel(info.applicationInfo);
+                        name = label == null ? "" : label.toString();
+                    } catch (RuntimeException ignored) {}
+                }
+                String check = (id + " " + name).toLowerCase(Locale.ROOT);
+                if (!check.contains("microg") &&
+                    !check.contains("mgoogle") &&
+                    !check.contains("gmscore") &&
+                    !check.contains("phonesky") &&
+                    !check.contains("google play") &&
+                    !check.contains("play store") &&
+                    !check.contains("play 商店") &&
+                    !check.contains("google 服务") &&
+                    !check.contains("谷歌") &&
+                    !check.contains("gservice") &&
+                    !check.contains("gms") &&
+                    !check.contains("vending") &&
+                    !check.contains("gsf") &&
+                    !check.equals("com.google.android.gms") &&
+                    !check.contains("com.android.vending") &&
+                    !check.contains("com.google.android.gsf")) continue;
+                line(b, id + " | " + name + " | " + info.versionName);
+                matches++;
+                if (matches >= 40) {
+                    line(b, "(相关软件包较多，前 40 项)");
+                    break;
+                }
+            }
+            line(b, "当前用户可见安装包: " + installed.size() + " | 相关匹配: " + matches);
+            if (matches == 0) {
+                line(b, "无匹配：可能使用未知包名、另一用户空间或系统阻止查询；不可判定未安装。");
+            }
+        } catch (RuntimeException e) {
+            line(b, "查询相关安装包失败：" + e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * A service may exist but not appear in queryIntentServices if its
+     * exported intent filter differs or is disabled. Inspect declarations,
+     * without binding to the service or accessing FIDO secrets.
+     */
+    @SuppressWarnings("deprecation")
+    private static void inspectFidoServices(StringBuilder b, PackageManager pm) {
+        String[] candidates = {
+            "com.google.android.gms", "org.microg.gms",
+            "com.mgoogle.android.gms", "app.revanced.android.gms"
+        };
+        int declarations = 0;
+        for (String pkg : candidates) {
+            try {
+                PackageInfo info = pm.getPackageInfo(pkg,
+                    PackageManager.GET_SERVICES | PackageManager.MATCH_DISABLED_COMPONENTS);
+                ServiceInfo[] services = info.services;
+                if (services == null) continue;
+                for (ServiceInfo service : services) {
+                    String name = service.name == null ? "" : service.name;
+                    if (!name.toLowerCase(Locale.ROOT).contains("fido")) continue;
+                    line(b, "服务声明: " + pkg + " -> " + name
+                        + " | exported=" + service.exported + " | enabled=" + service.enabled);
+                    declarations++;
+                }
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // A particular package ID is not present; other IDs may be.
+            } catch (RuntimeException e) {
+                line(b, pkg + " 服务检查失败: " + e.getClass().getSimpleName());
+            }
+        }
+        if (declarations == 0) {
+            line(b, "没有找到常见包名下的 FIDO 服务声明；不能直接证明 FIDO2 不工作。");
         }
     }
 
