@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+    <!-- Local diagnostic only. Enumerate installed apps to locate vendor-renamed GMS/Play packages; no INTERNET permission. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- Android 11+ package visibility: only the packages needed for this local test. -->
     <queries>
