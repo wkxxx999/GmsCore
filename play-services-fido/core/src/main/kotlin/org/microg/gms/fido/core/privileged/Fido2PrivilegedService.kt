@@ -10,6 +10,7 @@ import android.app.PendingIntent.FLAG_UPDATE_CURRENT
 import android.content.Context
 import android.content.Context.KEYGUARD_SERVICE
 import android.content.Intent
+import android.os.Binder
 import android.os.Build.VERSION.SDK_INT
 import android.os.Parcel
 import android.util.Log
@@ -26,12 +27,18 @@ import com.google.android.gms.fido.fido2.api.IBooleanCallback
 import com.google.android.gms.fido.fido2.api.ICredentialListCallback
 import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialCreationOptions
 import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialRequestOptions
+import com.google.android.gms.fido.fido2.api.common.FidoCredentialDetails
+import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialUserEntity
 import com.google.android.gms.fido.fido2.internal.privileged.IFido2PrivilegedCallbacks
 import com.google.android.gms.fido.fido2.internal.privileged.IFido2PrivilegedService
 import org.microg.gms.BaseService
 import org.microg.gms.common.GmsService
 import org.microg.gms.common.GmsService.FIDO2_PRIVILEGED_API
 import org.microg.gms.fido.core.FEATURES
+import org.microg.gms.fido.core.Database
+import org.microg.gms.fido.core.protocol.CredentialId
+import org.microg.gms.fido.core.transport.Transport
+import org.microg.gms.fido.core.transport.screenlock.ScreenLockCredentialStore
 import org.microg.gms.fido.core.ui.AuthenticatorActivity
 import org.microg.gms.fido.core.ui.AuthenticatorActivity.Companion.SOURCE_BROWSER
 import org.microg.gms.fido.core.ui.AuthenticatorActivity.Companion.KEY_SOURCE
@@ -41,6 +48,8 @@ import org.microg.gms.fido.core.ui.AuthenticatorActivity.Companion.KEY_TYPE
 import org.microg.gms.fido.core.ui.AuthenticatorActivity.Companion.TYPE_REGISTER
 import org.microg.gms.fido.core.ui.AuthenticatorActivity.Companion.TYPE_SIGN
 import org.microg.gms.utils.warnOnTransactionIssues
+import org.microg.gms.utils.getFirstSignatureDigest
+import org.microg.gms.utils.toBase64
 
 const val TAG = "Fido2Privileged"
 
@@ -96,9 +105,45 @@ class Fido2PrivilegedServiceImpl(private val context: Context, override val life
     }
 
     override fun getCredentialList(callbacks: ICredentialListCallback, rpId: String) {
-        Log.w(TAG, "Not yet implemented: getCredentialList")
+        // Binder identity must be captured before dispatching work to lifecycleScope.
+        // This API exposes account identifiers, so don't reveal records to arbitrary apps.
+        val callingUid = Binder.getCallingUid()
         lifecycleScope.launchWhenStarted {
-            runCatching { callbacks.onCredentialList(emptyList()) }
+            val database = Database(context)
+            val isAuthorized = callingUid == context.applicationInfo.uid ||
+                context.packageManager.getPackagesForUid(callingUid).orEmpty().any { packageName ->
+                    val signature = context.packageManager
+                        .getFirstSignatureDigest(packageName, "SHA-256")?.toBase64()
+                    signature != null && database.isPrivileged(packageName, signature)
+                }
+            if (!isAuthorized || SDK_INT < 24 || rpId.isBlank()) {
+                runCatching { callbacks.onCredentialList(emptyList()) }
+                return@launchWhenStarted
+            }
+
+            val store = ScreenLockCredentialStore(context)
+            val credentials = database.getKnownRegistrationInfo(rpId)
+                .filter { it.transport == Transport.SCREEN_LOCK }
+                .mapNotNull { record ->
+                    runCatching {
+                        val (type, keyId) = CredentialId.decodeTypeAndDataByBase64(record.credential)
+                        if (type != 1.toByte() || !store.containsKey(rpId, keyId)) {
+                            return@runCatching null
+                        }
+                        val publicKey = store.getPublicKey(rpId, keyId) ?: return@runCatching null
+                        val user = PublicKeyCredentialUserEntity.parseJson(record.userJson)
+                        FidoCredentialDetails(
+                            user.name,
+                            user.displayName,
+                            user.id,
+                            CredentialId(type, keyId, rpId, publicKey).encode(),
+                            true,
+                            false
+                        )
+                    }.onFailure { Log.w(TAG, "Skipping unreadable local credential", it) }.getOrNull()
+                }
+            runCatching { callbacks.onCredentialList(credentials) }
+                .onFailure { Log.w(TAG, "Unable to return local credentials", it) }
         }
     }
 
